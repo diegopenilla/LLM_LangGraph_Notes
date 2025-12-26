@@ -66,7 +66,7 @@ Assistant: "Could you please help clean up this mess?\"""",
 # Build the minimal LangGraph pipeline
 builder = StateGraph(MessagesState)
 builder.add_node("rewriter_node", rewriter_node)
-builder.set_entry_point("rewriter_node")
+builder.add_edge(START, "rewriter_node")
 builder.add_edge("rewriter_node", END)
 
 graph = builder.compile()

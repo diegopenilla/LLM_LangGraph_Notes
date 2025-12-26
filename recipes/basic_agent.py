@@ -12,7 +12,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 
 from langgraph.graph import START, StateGraph, MessagesState
-from langgraph.prebuilt import ToolNode, tools_condition
+from langchain.agents import ToolNode, tools_condition
 from utils import save_graph
 
 

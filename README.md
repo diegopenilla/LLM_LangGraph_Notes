@@ -1,15 +1,123 @@
 # LangGraph Study Notes
 
-**LangGraph** is a framework designed for building **agent-based** and **multi-agent** applications. Unlike traditional sequential workflows, LangGraph introduces a **graph-based architecture**, enabling greater control over the flow of logic, enhanced parallel processing, and improved interpretability of AI-driven workflows.
+**LangGraph** is a low-level orchestration framework designed for building, managing, and deploying **long-running, stateful agents**. Unlike traditional sequential workflows, LangGraph introduces a **graph-based architecture**, enabling greater control over the flow of logic, enhanced parallel processing, and improved interpretability of AI-driven workflows.
 
+## Table of Contents
+
+- [Version Information](#version-information)
+- [Key Features](#key-features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Core Concepts](#core-concepts)
+  - [Chat Models](#1-chat-models)
+  - [Message State Management](#2-message-state-management)
+  - [Graph Representation](#3-graph-representation)
+  - [State Management](#4-state-management)
+  - [Agents](#5-agents)
+  - [Tool Nodes](#6-tool-nodes)
+  - [Reducers](#7-reducers)
+  - [Input-Output Schema](#8-input-output-schema)
+- [Advanced Features](#advanced-features)
+  - [Checkpoints and Persistence](#checkpoints-and-persistence)
+  - [Streaming](#streaming)
+  - [Batch Processing](#batch-processing)
+  - [Async Execution](#async-execution)
+  - [Human-in-the-Loop](#human-in-the-loop)
+  - [Conditional Routing](#conditional-routing)
+  - [Command Pattern (LLM-Driven Routing)](#command-pattern-llm-driven-routing)
+  - [Parallel Execution](#parallel-execution)
+- [Common Patterns](#common-patterns)
+- [Best Practices](#best-practices)
+- [Resources](#resources)
 
 ---
 
-## **1. Chat Models**
+## Version Information
+
+- **LangGraph Version:** 1.0+ (compatible)
+- **Last Updated:** January 2025
+- **Note:** This repository uses LangGraph 1.0+ patterns. The deprecated `langgraph.prebuilt` module has been migrated to `langchain.agents`.
+
+---
+
+## Key Features
+
+LangGraph provides several production-ready capabilities:
+
+- **🔄 Durable Execution**: Agents can persist through failures and resume from checkpoints, ensuring reliability in long-running processes.
+- **👤 Human-in-the-Loop**: Incorporate human oversight by allowing inspection and modification of agent states during execution.
+- **🧠 Comprehensive Memory**: Support both short-term working memory and long-term memory across sessions, facilitating rich, personalized interactions.
+- **🚀 Production-Ready Deployment**: Deploy sophisticated agent systems confidently with scalable infrastructure designed for stateful, long-running workflows.
+- **📊 Streaming Support**: Real-time output streaming for interactive applications.
+- **🔍 Observability**: Integration with LangSmith for agent evaluations and monitoring.
+
+---
+
+## Installation
+
+```bash
+pip install -U langgraph
+```
+
+For full functionality, you may also need:
+
+```bash
+pip install langchain-core langchain-openai langchain-community
+```
+
+For checkpoint persistence (optional):
+
+```bash
+# In-memory checkpoints (default)
+# Already included in langgraph
+
+# PostgreSQL checkpoints
+pip install langgraph-checkpoint-postgres
+
+# SQLite checkpoints  
+pip install langgraph-checkpoint-sqlite
+```
+
+---
+
+## Quick Start
+
+Here's a minimal example to get started:
+
+```python
+from langgraph.graph import START, END, StateGraph, MessagesState
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage
+
+# Define a simple node
+def assistant(state: MessagesState):
+    llm = ChatOpenAI(model="gpt-3.5-turbo")
+    response = llm.invoke(state["messages"])
+    return {"messages": [response]}
+
+# Build the graph
+graph = StateGraph(MessagesState)
+graph.add_node("assistant", assistant)
+graph.add_edge(START, "assistant")
+graph.add_edge("assistant", END)
+
+# Compile and run
+compiled_graph = graph.compile()
+result = compiled_graph.invoke({"messages": [HumanMessage(content="Hello!")]})
+print(result["messages"][-1].content)
+```
+
+---
+
+## Core Concepts
+
+### **1. Chat Models**
+
 LangGraph integrates with **LLMs (Large Language Models)** through **Chat Models**. A Chat Model represents a structured interface between a model and the graph-based system.
 
-### **Core Parameters**
-- **Model Name** (`model`) → Specifies the underlying LLM (e.g., `gpt-4`, `claude-2`).
+#### **Core Parameters**
+
+- **Model Name** (`model`) → Specifies the underlying LLM (e.g., `gpt-4`, `claude-2`, `gpt-3.5-turbo`).
 - **Temperature (`T`)** → Controls LLM output randomness:
   - `T = 0` → Deterministic and fact-driven responses.
   - `T = 1` → Highly creative and variable responses.
@@ -18,13 +126,30 @@ LangGraph integrates with **LLMs (Large Language Models)** through **Chat Models
 
 Chat Models serve as **nodes in the computation graph**, processing input messages and generating structured responses.
 
+**Example:**
+
+```python
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import SystemMessage, HumanMessage
+
+llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.7)
+messages = [
+    SystemMessage(content="You are a helpful assistant."),
+    HumanMessage(content="What is LangGraph?")
+]
+response = llm.invoke(messages)
+```
+
 ---
 
-## **2. Message State Management**
+### **2. Message State Management**
+
 LangGraph introduces **stateful message tracking**, ensuring continuity in conversations and AI agent interactions.
 
-### **Structure of a Message**
+#### **Structure of a Message**
+
 Each message is structured as:
+
 ```json
 {
   "role": "user",
@@ -32,81 +157,233 @@ Each message is structured as:
   "response_metadata": {}
 }
 ```
+
 - **`role`** → Specifies message origin (`"user"`, `"assistant"`, `"system"`, `"tool"`).
 - **`content`** → The actual text or multimodal input.
 - **`response_metadata`** → Logs additional data (e.g., token usage, log probabilities).
 
 Messages are stored in **Message State**, a mutable structure that dynamically updates as the agent interacts with the environment.
 
+**MessagesState** is a built-in state class that manages conversation history:
+
+```python
+from langgraph.graph import MessagesState
+
+# MessagesState automatically handles message accumulation
+def node(state: MessagesState):
+    # Access all messages
+    all_messages = state["messages"]
+    # Add new message
+    return {"messages": [new_message]}
+```
+
 ---
 
-## **3. Graph Representation**
+### **3. Graph Representation**
+
 A **graph-based workflow** forms the foundation of LangGraph. It enables complex logic execution by defining nodes (operations) and edges (data flow).
 
 A **graph** in LangGraph consists of:
+
 - **Nodes** $N = n_1, n_2, ..., n_k$ → Represent **computational units** (functions, models, or decision points).
 - **Edges** $E =(n_i, n_j)$ → Define **execution order** and dependencies between nodes.
 
-A simple LangGraph workflow may look like:
+**Basic Graph Construction:**
+
 ```python
-graph = Graph()
-graph.add_node("process_input", process_input_fn)
-graph.add_node("llm", chat_model_fn)
-graph.add_edge("process_input", "llm")
+from langgraph.graph import START, END, StateGraph, MessagesState
+
+def process_input(state: MessagesState):
+    # Process input
+    return {"messages": [processed_message]}
+
+def llm_node(state: MessagesState):
+    # LLM processing
+    return {"messages": [llm_response]}
+
+# Build the graph
+builder = StateGraph(MessagesState)
+builder.add_node("process_input", process_input)
+builder.add_node("llm", llm_node)
+builder.add_edge(START, "process_input")
+builder.add_edge("process_input", "llm")
+builder.add_edge("llm", END)
+
+graph = builder.compile()
 ```
+
 This structure allows **conditional routing, parallel execution, and adaptive workflows**.
 
 ---
 
-## **4. Agents**
+### **4. State Management**
+
+LangGraph uses **TypedDict** for type-safe state definitions. States can be simple or complex, with support for reducers to handle state updates.
+
+#### **Custom State Definition**
+
+```python
+from typing import TypedDict, Annotated
+from typing_extensions import Annotated
+import operator
+
+class MyState(TypedDict):
+    messages: list  # Simple list
+    counter: int    # Simple value
+    items: Annotated[list, operator.add]  # Reducer for accumulation
+```
+
+#### **State Reducers**
+
+Reducers define how state fields are updated when multiple nodes modify them:
+
+- **`operator.add`** → Concatenates lists or adds numbers
+- **`operator.or_`** → Merges dictionaries
+- **Custom reducers** → Define your own update logic
+
+**Example with Reducer:**
+
+```python
+from typing import Annotated
+import operator
+
+class State(TypedDict):
+    context: Annotated[list, operator.add]  # Accumulates items
+
+def node_a(state: State):
+    return {"context": ["item1"]}
+
+def node_b(state: State):
+    return {"context": ["item2"]}
+
+# After both nodes run, context = ["item1", "item2"]
+```
+
+---
+
+### **5. Agents**
+
 An **Agent** in LangGraph is an entity that interacts with the system by executing a sequence of actions, deciding on tool usage, and dynamically adjusting its state.
 
-### **Agent Components**
+#### **Agent Components**
+
 - **Memory State** → Retains past interactions.
 - **Decision Policy** → Determines the next best action.
 - **Tool Invocation** → Calls external tools or functions.
 
 Agents operate within a graph, allowing flexibility in AI-driven applications, such as task automation and intelligent decision-making.
 
+**Basic Agent Pattern:**
+
+```python
+from langgraph.graph import MessagesState, StateGraph, START, END
+from langchain.agents import ToolNode, tools_condition
+
+def agent(state: MessagesState):
+    llm_with_tools = llm.bind_tools(tools)
+    response = llm_with_tools.invoke(state["messages"])
+    return {"messages": [response]}
+
+builder = StateGraph(MessagesState)
+builder.add_node("agent", agent)
+builder.add_node("tools", ToolNode(tools))
+builder.add_edge(START, "agent")
+builder.add_conditional_edges("agent", tools_condition)  # Routes to tools if needed
+builder.add_edge("tools", "agent")  # Loop back after tool execution
+```
+
 ---
 
-## **5. Tool Nodes**
+### **6. Tool Nodes**
+
 LangGraph enables the use of **Tool Nodes**, which represent external function calls that augment model capabilities.
 
-### **Defining a Tool Node**
+#### **Defining Tools**
+
 ```python
+from langchain_core.tools import tool
+
+@tool
 def search_tool(query: str) -> str:
+    """Search for information about a query."""
     return f"Searching for {query}..."
 
-tool_node = ToolNode("search", search_tool)
+@tool
+def calculator(a: float, b: float, operation: str) -> float:
+    """Perform arithmetic operations."""
+    if operation == "add":
+        return a + b
+    elif operation == "multiply":
+        return a * b
+    # ...
+
+tools = [search_tool, calculator]
 ```
+
+#### **Using ToolNode**
+
+```python
+from langchain.agents import ToolNode
+
+# ToolNode automatically handles tool execution
+tool_node = ToolNode(tools)
+
+builder.add_node("tools", tool_node)
+```
+
 Tool Nodes integrate with agents, allowing them to **execute API calls, database queries, or computations dynamically**.
 
 ---
 
-## **6. Reducers**
+### **7. Reducers**
+
 A **Reducer** aggregates multiple outputs into a single consolidated result. This is useful in **multi-step, multi-agent, or parallel workflows**.
 
-### **Common Reducers**
-- **Concatenation Reducer** → Merges outputs into a single string.
-- **Scoring Reducer** → Ranks and selects the best response.
-- **Summarization Reducer** → Generates a concise summary from multiple results.
+#### **Common Reducers**
 
-Example:
+- **Concatenation Reducer** (`operator.add`) → Merges outputs into a single list.
+- **Dictionary Merge** (`operator.or_`) → Combines dictionaries.
+- **Custom Reducers** → Define your own aggregation logic.
+
+**Example:**
+
 ```python
-def reduce_responses(responses: List[str]) -> str:
-    return "\n".join(responses)
+from typing import Annotated
+import operator
+
+class State(TypedDict):
+    responses: Annotated[list, operator.add]  # Accumulates responses
+
+def parallel_node_1(state: State):
+    return {"responses": ["Response 1"]}
+
+def parallel_node_2(state: State):
+    return {"responses": ["Response 2"]}
+
+# After both nodes: responses = ["Response 1", "Response 2"]
 ```
-Reducers enhance data flow efficiency, ensuring coherent and relevant outputs in LangGraph applications.
+
+**Custom Reducer Example:**
+
+```python
+def custom_reducer(left: list, right: list) -> list:
+    """Custom logic to merge lists."""
+    return left + [f"Processed: {item}" for item in right]
+
+class State(TypedDict):
+    items: Annotated[list, custom_reducer]
+```
 
 ---
 
-## **7. Input-Output Schema**
-To ensure consistency and structured data processing, LangGraph enforces **Input-Output Schemas**.
+### **8. Input-Output Schema**
 
-### **Schema Definition**
+To ensure consistency and structured data processing, LangGraph enforces **Input-Output Schemas** using TypedDict.
+
+#### **Schema Definition**
+
 ```python
-from typing import TypedDict
+from typing import TypedDict, Optional
 
 class InputSchema(TypedDict):
     user_query: str
@@ -114,412 +391,813 @@ class InputSchema(TypedDict):
 
 class OutputSchema(TypedDict):
     response: str
+    confidence: float
 ```
+
 Schemas ensure that **each node receives and outputs data in a well-defined format**, making debugging and scaling much easier.
 
-## Recipes
-
-## 1. [Simple Arithmetic Agent](./recipes/basic_agent.py)
-
-![Basic Agent](./images/agent_graph.png)
-
-This script implements an **arithmetic assistant** using **LangChain**, **OpenAI’s ChatGPT**, and a **computation graph**. The assistant can perform arithmetic operations—addition, multiplication, and division—by integrating them as callable tools within an **LLM** agent.
-
-Given two numbers $a, b \in \mathbb{R}$, the assistant supports the following operations: addition, multiplication and division.
-
-These functions are then bound to an **LLM-powered agent** that can process user queries and execute the correct arithmetic operation.
-
+**Using with StateGraph:**
 
 ```python
-def add(a: float, b: float) -> float:
-  """Add two numbers."""
-    return a + b
+class MyState(TypedDict):
+    query: str
+    results: list
+    metadata: dict
 
-def multiply(a: float, b: float) -> float:
-  """Multiply two numbers."""
-    return a * b
-
-def divide(a: float, b: float) -> float:
-  """Divide two numbers."""
-    return "Error: Division by zero" if b == 0 else a / b
-
-tools = [add, multiply, divide]
-llm = ChatOpenAI(model="gpt-3.5-turbo")
-llm_with_tools = llm.bind_tools(tools)
-
-sys_msg = SystemMessage(content="You are a helpful assistant tasked with performing arithmetic.")
-
-def assistant(state: MessagesState):
-    return {"messages": [llm_with_tools.invoke([sys_msg] + state["messages"])]}
-
-builder = StateGraph(MessagesState)
-builder.add_node("assistant", assistant)
-builder.add_node("tools", ToolNode(tools))
-builder.add_edge(START, "assistant")
-builder.add_conditional_edges("assistant", tools_condition)
-builder.add_edge("tools", "assistant")
-
-graph = builder.compile()
-
-def main():
-    print("\n🪮 Arithmetic Assistant 🪮\n")
-    print("Computing: 25 * 30 / 24")
-    
-    user_input = "25 * 30 / 24"
-    messages = [HumanMessage(content=user_input)]
-    state = {"messages": messages}
-
-    result = graph.invoke(state)
-    final_message = result["messages"][-1]
-    print("Result:", final_message.content)
-
-    save_graph(graph, "./images/basic_agent.png")
-
-if __name__ == "__main__":
-    main()
+builder = StateGraph(MyState)
+# All nodes must conform to MyState schema
 ```
 
-The assistant is implemented using a **computation graph** that models the processing flow:
+---
 
-| Step | Description |
-|------|------------|
-| **Define operations** | Arithmetic functions 
-| **Bind to LLM** | Attach functions to a LangChain-powered agent |
-| **Graph construction** | Define nodes and edges for function execution |
-| **Interactive execution** | Process user input and compute results |
+## Advanced Features
 
-This shows a structured way to integrate **arithmetic operations** into an **LLM agent** using a **computation graph**. 
+### Checkpoints and Persistence
 
-```math
-\text{Final Result} = \left( 25 \times 30 \right) / 24 = 31.25
-```
+LangGraph supports checkpointing to persist agent state, enabling durable execution and resumable workflows.
 
-Other tools and functions can be integrated into the graph, enabling the creation of more complex workflows. The LLM will call the functions (tool nodes) at is own digression based on their arguments and docstrings. 
-
-## 2. [Few Shot Learning (Minimal)](./recipes/few_shot_learning.py)
-
-![](./images/few_shot_learning.png)
-
-This script defines a single node `rewriter_node` that demonstrates how to
-provide multiple few-shot examples for polite rewrites in an LLM prompt.
-
-
-Given an input sentence $s$, the assistant maps it to a rewritten form $s'$ that maintains the original meaning but enhances politeness. 
-
-- The function $f$ is learned using few-shot examples, where each example provides a mapping from an impolite to a polite sentence.
+#### **In-Memory Checkpoints**
 
 ```python
-model = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.2)
+from langgraph.checkpoint.memory import MemorySaver
 
-def rewriter_node(state: MessagesState) -> Command[Literal["__end__"]]:
-    """
-    A node that uses few-shot examples to guide the LLM in producing
-    polite rewrites of user-provided sentences.
-    """
+checkpointer = MemorySaver()
+graph = builder.compile(checkpointer=checkpointer)
 
-    few_shot_examples = [
-        """Example 1:
-User: "Rewrite this sentence more politely: 'Give me water now!'"
-Assistant: "Could you please give me some water?\"""",
-        """Example 2:
-User: "Rewrite this sentence more politely: 'Move over.'"
-Assistant: "Could you please move over?\"""",
-        """Example 3:
-User: "Rewrite this sentence more politely: 'Stop talking.'"
-Assistant: "Could you please stop talking?\"""",
-        """Example 4:
-User: "Rewrite this sentence more politely: 'Clean this mess up!'"
-Assistant: "Could you please help clean up this mess?\"""",
+# Use with thread_id for multi-user scenarios
+config = {"configurable": {"thread_id": "user-123"}}
+result = graph.invoke(state, config=config)
+```
+
+#### **PostgreSQL Checkpoints**
+
+```python
+from langgraph.checkpoint.postgres import PostgresSaver
+
+checkpointer = PostgresSaver.from_conn_string("postgresql://...")
+graph = builder.compile(checkpointer=checkpointer)
+```
+
+#### **SQLite Checkpoints**
+
+```python
+from langgraph.checkpoint.sqlite import SqliteSaver
+
+checkpointer = SqliteSaver.from_conn_string("sqlite:///checkpoints.db")
+graph = builder.compile(checkpointer=checkpointer)
+```
+
+**Benefits:**
+
+- **Resume from failures**: Agents can recover from crashes
+- **Multi-user support**: Isolated state per user/session
+- **State inspection**: Debug and monitor agent state
+- **Human review**: Pause and inspect state before continuing
+
+---
+
+### Streaming
+
+Stream intermediate steps as they execute for real-time feedback.
+
+#### **Basic Streaming**
+
+```python
+for event in graph.stream(state, config=config):
+    # Process each step
+    print(event)
+```
+
+#### **Streaming Specific Nodes**
+
+```python
+# Stream only specific nodes
+for event in graph.stream(state, config=config, stream_mode="updates"):
+    if "assistant" in event:
+        print("Assistant:", event["assistant"])
+```
+
+#### **Streaming Messages**
+
+```python
+# Stream message updates
+for event in graph.stream(state, config=config, stream_mode="messages"):
+    if event:
+        print(event[-1].content)
+```
+
+**Stream Modes:**
+
+- `"values"` → Full state after each step
+- `"updates"` → Only changed state fields
+- `"messages"` → Only message updates
+
+---
+
+### Batch Processing
+
+Process multiple inputs efficiently in a single call. Batch processing is essential for handling multiple requests simultaneously, improving throughput and resource utilization.
+
+#### **Synchronous Batch Processing**
+
+```python
+# Process multiple inputs at once
+inputs = [
+    {"messages": [HumanMessage(content="What is Python?")]},
+    {"messages": [HumanMessage(content="What is JavaScript?")]},
+    {"messages": [HumanMessage(content="What is Rust?")]},
+]
+
+# All inputs processed sequentially but efficiently
+results = graph.batch(inputs, config=config)
+
+# Access individual results
+for i, result in enumerate(results):
+    print(f"Result {i}: {result['messages'][-1].content}")
+```
+
+**Use Cases:**
+- Processing multiple user queries in a single request
+- Batch data processing pipelines
+- ETL workflows with multiple inputs
+- When you need all results before proceeding
+
+**Benefits:**
+- **Efficient resource usage**: Better utilization of LLM API rate limits
+- **Simplified code**: Single call instead of loops
+- **Consistent configuration**: Same config applied to all inputs
+- **Error handling**: Can handle errors per input without stopping entire batch
+
+#### **Async Batch Processing**
+
+For I/O-bound operations (API calls, database queries), async batch processing allows concurrent execution, dramatically improving performance:
+
+```python
+import asyncio
+
+# Process multiple inputs concurrently
+async def process_batch():
+    inputs = [
+        {"messages": [HumanMessage(content="Query 1")]},
+        {"messages": [HumanMessage(content="Query 2")]},
+        {"messages": [HumanMessage(content="Query 3")]},
     ]
+    
+    # All inputs processed concurrently (non-blocking)
+    results = await graph.abatch(inputs, config=config)
+    
+    return results
 
-    # Combine examples into one system prompt
-    few_shot_prompt = (
-        "You are a helpful rewriting assistant. "
-        "Below are examples of rewriting sentences into a more polite form.\n\n"
-        + "\n\n".join(few_shot_examples)
+# Run async batch
+results = asyncio.run(process_batch())
+```
+
+**When to Use `abatch()` vs `batch()`:**
+
+- **Use `abatch()`** when:
+  - Processing many inputs (10+)
+  - Operations are I/O-bound (API calls, database queries)
+  - You want maximum throughput
+  - You're already in an async context
+
+- **Use `batch()`** when:
+  - Processing few inputs (< 10)
+  - You need synchronous execution
+  - Simple scripts or synchronous codebases
+  - Debugging (easier to debug sync code)
+
+**Performance Comparison:**
+
+```python
+# Synchronous: Processes one at a time
+# Time: ~3 seconds for 3 queries (1 sec each)
+results = graph.batch(inputs, config=config)
+
+# Async: Processes concurrently
+# Time: ~1 second for 3 queries (all at once)
+results = await graph.abatch(inputs, config=config)
+```
+
+**Batch with Different Configs:**
+
+```python
+# Each input can have its own config (e.g., different thread_ids)
+configs = [
+    {"configurable": {"thread_id": "user-1"}},
+    {"configurable": {"thread_id": "user-2"}},
+    {"configurable": {"thread_id": "user-3"}},
+]
+
+results = graph.batch(inputs, config=configs)
+```
+
+**Error Handling in Batches:**
+
+```python
+from langgraph.errors import GraphRecursionError
+
+try:
+    results = graph.batch(inputs, config=config)
+except Exception as e:
+    # Handle batch-level errors
+    print(f"Batch failed: {e}")
+
+# Or handle per-input errors
+results = []
+for input_state in inputs:
+    try:
+        result = graph.invoke(input_state, config=config)
+        results.append(result)
+    except Exception as e:
+        print(f"Input failed: {e}")
+        results.append(None)  # Or handle error state
+```
+
+---
+
+### Async Execution
+
+LangGraph supports async execution for improved performance in I/O-bound operations. Use async methods when building web servers, APIs, or any application that needs to handle multiple concurrent requests.
+
+#### **Async Node Functions**
+
+Define nodes as async functions to enable non-blocking execution:
+
+```python
+async def async_assistant(state: MessagesState):
+    llm = ChatOpenAI(model="gpt-3.5-turbo")
+    # Use ainvoke for async LLM calls
+    response = await llm.ainvoke(state["messages"])
+    return {"messages": [response]}
+
+# Graph automatically handles async nodes
+builder.add_node("assistant", async_assistant)
+graph = builder.compile()
+```
+
+#### **Async Invoke**
+
+Execute a single graph run asynchronously:
+
+```python
+import asyncio
+
+async def main():
+    config = {"configurable": {"thread_id": "user-123"}}
+    result = await graph.ainvoke(
+        {"messages": [HumanMessage(content="Hello!")]},
+        config=config
     )
+    return result
 
-    # The final message list
-    messages = [
-        {"role": "system", "content": few_shot_prompt},
-        *state["messages"],
-    ]
-
-    # Invoke the LLM
-    ai_response = model.invoke(messages)
-
-    # Return the final AI message
-    return {"messages": [ai_response]}
-
-# Build the minimal LangGraph pipeline
-builder = StateGraph(MessagesState)
-builder.add_node("rewriter_node", rewriter_node)
-builder.set_entry_point("rewriter_node")
-builder.add_edge("rewriter_node", END)
-
-graph = builder.compile()
-
-
-def main():
-    user_input = "Give me the bottle of water immediately!"
-    print("\n--- Polite Rewriter ---\n")
-    print(f"Original input: \"{user_input}\"\n")
-    
-    result = graph.invoke({"messages": [("user", user_input)]})
-    
-    if "messages" in result and result["messages"]:
-        final_message = result["messages"][-1]
-        print(f"Polite version: \"{final_message.content}\"")
-    else:
-        print("No response generated.")
-    
-    print("\nDone.")
-
-    save_graph(graph, "./images/few_shot_learning.png")
-
-if __name__ == "__main__":
-    main()
-
+result = asyncio.run(main())
 ```
 
-By using structured examples, the model learns to map according to the examples provided. This script demonstrates how to use **few-shot learning** to guide an LLM in generating certain types of responses.
+#### **Async Stream**
 
-## 3. [Map-Reduce Joke Generator](./recipes/map_reduce.py)
-
-![](./images/map_reduce.png)
-
-This script implements a **map-reduce** pipeline using **LangGraph** and **GPT-4o** to generate jokes based on a given topic. The process follows these steps:
-
-1. Generate **sub-topics** related to the given topic.
-2. Generate a **joke** for each sub-topic.
-3. Select the **best joke** from the generated set.
-
-## Pipeline
-
-
-| Step | Description |
-|------|------------|
-| **Generate Topics** | Create 3 sub-topics related to the main topic. |
-| **Generate Jokes** | Generate a joke for each sub-topic. |
-| **Select Best Joke** | Choose the best joke from the generated list. |
-
+Stream results asynchronously for real-time updates:
 
 ```python
-subjects_prompt = """Generate a list of 3 sub-topics related to {topic}."""
-joke_prompt = """Generate a joke about {subject}"""
-best_joke_prompt = """Select the best joke from:
-
-{jokes}"""
-
-# LLM
-model = ChatOpenAI(model="gpt-4o", temperature=0)
-
-# Define states
-class Subjects(BaseModel):
-    subjects: list[str]
-
-class BestJoke(BaseModel):
-    id: int
+async def stream_results():
+    config = {"configurable": {"thread_id": "user-123"}}
     
-class OverallState(TypedDict):
-    topic: str
-    subjects: list
-    jokes: Annotated[list, operator.add]
-    best_selected_joke: str
+    async for event in graph.astream(
+        {"messages": [HumanMessage(content="Hello!")]},
+        config=config
+    ):
+        # Process each event as it arrives
+        print(event)
 
-def generate_topics(state: OverallState)-> Subjects:
-    prompt = subjects_prompt.format(topic=state["topic"])
-    response = model.with_structured_output(Subjects).invoke(prompt)
-    return {"subjects": response.subjects}
+asyncio.run(stream_results())
+```
 
-def generate_joke(state: TypedDict):
-    prompt = joke_prompt.format(subject=state["subject"])
-    response = model.with_structured_output(Joke).invoke(prompt)
-    return {"jokes": [response.joke]}
+#### **Async Batch**
 
-def best_joke(state: OverallState):
-    prompt = best_joke_prompt.format(topic=state["topic"], jokes="\n\n".join(state["jokes"]))
-    response = model.with_structured_output(BestJoke).invoke(prompt)
-    return {"best_selected_joke": state["jokes"][response.id]}
+Process multiple inputs concurrently (see [Batch Processing](#batch-processing) for details):
 
-def continue_to_jokes(state: OverallState):
-    return [Send("generate_joke", {"subject": s}) for s in state["subjects"]]
+```python
+async def process_multiple():
+    inputs = [
+        {"messages": [HumanMessage(content="Query 1")]},
+        {"messages": [HumanMessage(content="Query 2")]},
+    ]
+    
+    # All inputs processed concurrently
+    results = await graph.abatch(inputs, config=config)
+    return results
+```
+
+**When to Use Async:**
+
+- ✅ **Web servers/APIs**: Handle multiple requests concurrently
+- ✅ **High-throughput applications**: Process many inputs simultaneously  
+- ✅ **I/O-bound operations**: API calls, database queries, file operations
+- ✅ **Real-time applications**: Streaming responses to multiple clients
+
+**When NOT to Use Async:**
+
+- ❌ **Simple scripts**: Synchronous code is easier to debug
+- ❌ **CPU-bound operations**: Async doesn't help with CPU-intensive tasks
+- ❌ **Single requests**: No benefit for one-off executions
+
+---
+
+### Human-in-the-Loop
+
+Add interrupts for human review and intervention during agent execution.
+
+#### **Basic Interrupt**
+
+```python
+from langgraph.graph import interrupt
+
+def review_node(state: MessagesState):
+    # This will pause execution for human input
+    interrupt("Please review the response before continuing")
+    return state
+
+builder.add_node("review", review_node)
+```
+
+#### **Using Interrupts**
+
+```python
+# When graph reaches interrupt, execution pauses
+config = {"configurable": {"thread_id": "user-123"}}
+result = graph.invoke(state, config=config)
+
+# Resume after human review
+updated_state = modify_state(result)  # Human modifies state
+graph.invoke(updated_state, config=config)
+```
+
+**Use Cases:**
+
+- **Approval workflows**: Require human approval before proceeding
+- **Error handling**: Pause on errors for manual intervention
+- **Quality control**: Review outputs before finalizing
+
+---
+
+### Conditional Routing
+
+Route execution based on state or node output.
+
+#### **Simple Conditional**
+
+```python
+def should_continue(state: MessagesState) -> str:
+    if len(state["messages"]) > 10:
+        return "summarize"
+    return "continue"
+
+builder.add_conditional_edges(
+    "agent",
+    should_continue,
+    {
+        "summarize": "summarizer",
+        "continue": "agent"
+    }
+)
+```
+
+#### **Using tools_condition**
+
+```python
+from langchain.agents import tools_condition
+
+# Automatically routes based on tool calls
+builder.add_conditional_edges("agent", tools_condition)
+builder.add_edge("tools", "agent")
+```
+
+#### **Multiple Routes**
+
+```python
+def route(state: State) -> list[str]:
+    # Can return multiple next nodes for parallel execution
+    if state["parallel"]:
+        return ["node_a", "node_b"]
+    return ["node_c"]
+
+builder.add_conditional_edges("start", route)
+```
+
+---
+
+### Command Pattern (LLM-Driven Routing)
+
+**TLDR:** The Command pattern enables **LLM-driven dynamic routing** - where the LLM itself intelligently decides the next step, rather than relying on static conditional logic. This is essential for multi-agent systems and adaptive workflows.
+
+#### **Why Command Pattern?**
+
+**Without Command (Static Routing):**
+```python
+# ❌ Static conditional - YOU decide the logic
+def route(state: MessagesState) -> str:
+    if "hotel" in state["messages"][-1].content.lower():
+        return "hotel_advisor"
+    elif "travel" in state["messages"][-1].content.lower():
+        return "travel_advisor"
+    return "general_agent"
+
+builder.add_conditional_edges("agent", route)
+```
+
+**With Command (LLM-Driven Routing):**
+```python
+# ✅ LLM decides - More intelligent, flexible
+from langgraph.types import Command
+from typing_extensions import Literal
+
+def travel_advisor(state: MessagesState) -> Command[Literal["hotel_advisor", "__end__"]]:
+    ai_msg = model.bind_tools([transfer_to_hotel_advisor]).invoke(state["messages"])
+    
+    if len(ai_msg.tool_calls) > 0:
+        # LLM intelligently decided it needs hotel expertise
+        return Command(goto="hotel_advisor", update={"messages": [ai_msg]})
+    
+    return {"messages": [ai_msg]}  # LLM decided it can handle it
+```
+
+#### **Key Benefits**
+
+- **Intelligent Routing**: LLM understands context and intent, not just keywords
+- **Natural Language**: Handles variations ("hotel", "accommodation", "place to stay")
+- **Multi-Agent Collaboration**: Agents can intelligently hand off to each other
+- **Adaptive**: No need to update code for new scenarios
+- **State Updates**: Can update state while routing
+
+#### **Complete Example: Multi-Agent System**
+
+```python
+from langgraph.graph import MessagesState, StateGraph, START
+from langgraph.types import Command
+from langchain_core.tools import tool
+from langchain_openai import ChatOpenAI
+from typing_extensions import Literal
+
+model = ChatOpenAI(model="gpt-3.5-turbo")
+
+# Define transfer tools
+@tool
+def transfer_to_hotel_advisor():
+    """Ask the hotel advisor agent for help with hotel recommendations."""
+    return
+
+@tool
+def transfer_to_travel_advisor():
+    """Ask the travel advisor agent for help with destinations."""
+    return
+
+# Travel Advisor Agent
+def travel_advisor(state: MessagesState) -> Command[Literal["hotel_advisor", "__end__"]]:
+    """Provides travel destination advice. Can hand off to hotel advisor if needed."""
+    system_prompt = (
+        "You are a travel expert. Recommend destinations. "
+        "If user asks about hotels, transfer to hotel_advisor."
+    )
+    messages = [{"role": "system", "content": system_prompt}] + state["messages"]
+    
+    # LLM decides: Do I need hotel expertise?
+    ai_msg = model.bind_tools([transfer_to_hotel_advisor]).invoke(messages)
+    
+    if len(ai_msg.tool_calls) > 0:
+        # YES - LLM intelligently decided to hand off
+        tool_msg = {
+            "role": "tool",
+            "content": "Transferring to hotel advisor",
+            "tool_call_id": ai_msg.tool_calls[-1]["id"]
+        }
+        return Command(
+            goto="hotel_advisor",
+            update={"messages": [ai_msg, tool_msg]}
+        )
+    
+    # NO - I can handle this myself
+    return {"messages": [ai_msg]}
+
+# Hotel Advisor Agent
+def hotel_advisor(state: MessagesState) -> Command[Literal["travel_advisor", "__end__"]]:
+    """Provides hotel recommendations. Can hand off back to travel advisor if needed."""
+    system_prompt = (
+        "You are a hotel expert. Provide hotel recommendations. "
+        "If you need destination info, ask travel_advisor."
+    )
+    messages = [{"role": "system", "content": system_prompt}] + state["messages"]
+    
+    ai_msg = model.bind_tools([transfer_to_travel_advisor]).invoke(messages)
+    
+    if len(ai_msg.tool_calls) > 0:
+        tool_msg = {
+            "role": "tool",
+            "content": "Transferring to travel advisor",
+            "tool_call_id": ai_msg.tool_calls[-1]["id"]
+        }
+        return Command(
+            goto="travel_advisor",
+            update={"messages": [ai_msg, tool_msg]}
+        )
+    
+    return {"messages": [ai_msg]}
 
 # Build Graph
-builder = StateGraph(OverallState)
-builder.add_node("generate_topics", generate_topics)
-builder.add_node("generate_joke", generate_joke)
-builder.add_node("best_joke", best_joke)
-builder.add_edge(START, "generate_topics")
-builder.add_conditional_edges("generate_topics", continue_to_jokes, ["generate_joke"])
-builder.add_edge("generate_joke", "best_joke")
-builder.add_edge("best_joke", END)
-
+builder = StateGraph(MessagesState)
+builder.add_node("travel_advisor", travel_advisor)
+builder.add_node("hotel_advisor", hotel_advisor)
+builder.add_edge(START, "travel_advisor")
 graph = builder.compile()
 
-# Run the pipeline
-def main():
-    initial_state = {"topic": "technology", "subjects": [], "jokes": [], "best_selected_joke": ""}
-    result = graph.invoke(initial_state)
-    print("\n=== Best Joke Selected ===\n", result.get("best_selected_joke", "No joke was selected."))
-    save_graph(graph, "./images/map_reduce.png")
-
-if __name__ == "__main__":
-    main()
+# Usage
+result = graph.invoke({
+    "messages": [{"role": "user", "content": "I want to visit Paris and need hotels"}]
+})
+# Travel advisor → [LLM analyzes] → Hands off to hotel_advisor → Response
 ```
 
-This **map-reduce** approach ensures efficient joke generation and selection using **LLMs and LangGraph**. The process scales dynamically for any given topic.
+#### **When to Use Command vs Conditional Edges**
 
+| Use Case | Use Command ✅ | Use Conditional Edges ✅ |
+|----------|---------------|-------------------------|
+| **LLM should decide routing** | Yes | No |
+| **Multi-agent collaboration** | Yes | No |
+| **Natural language understanding** | Yes | No |
+| **Simple boolean conditions** | No | Yes |
+| **Performance-critical (no LLM call)** | No | Yes |
+| **Predefined workflow paths** | No | Yes |
 
-## 4. [Parallel Search](./recipes/parallel_search.py)
-
-![](./images/parallel_search.png)
-
-
-This script retrieves contextual information from **Wikipedia** and **web search** before generating a final response.
-
-
-| Step | Description |
-|------|------------|
-| **Fetch Wikipedia Results** | Retrieves relevant Wikipedia documents. |
-| **Fetch Web Search Results** | Fetches relevant web pages. |
-| **Generate Answer** | Uses retrieved context to generate a response. |
-
+#### **Command with State Updates**
 
 ```python
-llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
-
-# Define state
-sharedKey = Annotated[list, operator.add]
-class State(TypedDict):
-    question: str
-    answer: str
-    context: sharedKey
-
-def fetch_web_results(state: State):
-    """ Retrieve documents from web search. """
-    search_docs = TavilySearchResults(max_results=3).invoke(state['question'])
-    formatted_search_docs = "\n\n---\n\n".join(
-        [f'<Document href="{doc["url"]}"/>{doc["content"]}</Document>' for doc in search_docs]
-    )
-    return {"context": [formatted_search_docs]}
-
-def fetch_wikipedia_results(state: State):
-    """ Retrieve documents from Wikipedia. """
-    search_docs = WikipediaLoader(query=state['question'], load_max_docs=2).load()
-    formatted_search_docs = "\n\n---\n\n".join(
-        [f'<Document source="{doc.metadata["source"]}"/>{doc.page_content}</Document>' for doc in search_docs]
-    )
-    return {"context": [formatted_search_docs]}
-
-def generate_response(state):
-    """ Generate an answer based on retrieved context. """
-    prompt = f"Answer the question {state['question']} using this context: {state['context']}"
-    answer = llm.invoke([SystemMessage(content=prompt), HumanMessage(content="Answer the question.")])
-    return {"answer": answer}
-
-# Construct the graph
-builder = StateGraph(State)
-builder.add_node("fetch_web_results", fetch_web_results)
-builder.add_node("fetch_wikipedia_results", fetch_wikipedia_results)
-builder.add_node("generate_response", generate_response)
-
-builder.add_edge(START, "fetch_wikipedia_results")
-builder.add_edge(START, "fetch_web_results")
-builder.add_edge("fetch_wikipedia_results", "generate_response")
-builder.add_edge("fetch_web_results", "generate_response")
-builder.add_edge("generate_response", END)
-
-graph = builder.compile()
-save_graph(graph, "./images/parallel_search.png")
-
-if __name__ == "__main__":
-    inputs = {
-        "question": f"What are the most viral/surprising events today ({datetime.now().strftime('%Y-%m-%d')})? Avoid political topics.",
-        "context": []
-    }
-    result = graph.invoke(inputs)
-    print("\nQuestion:", inputs["question"])
-    print("\nAnswer:", result["answer"].content)
+def agent(state: MessagesState) -> Command[Literal["specialist", "__end__"]]:
+    ai_msg = model.bind_tools([transfer_tool]).invoke(state["messages"])
+    
+    if ai_msg.tool_calls:
+        return Command(
+            goto="specialist",
+            update={
+                "messages": [ai_msg],
+                "context": {"previous_agent": "general"},  # Add metadata
+                "priority": "high"  # Update state
+            }
+        )
+    
+    return {"messages": [ai_msg]}
 ```
 
-This enhances LLM responses by aggregating real-time knowledge from **Wikipedia and web sources**, ensuring more informed/up to date answers.
+#### **Real-World Use Cases**
 
-## 5. [Summarizer](./recipes/summarizer.py)
+**1. Customer Support Escalation**
+```python
+def support_agent(state: MessagesState) -> Command[Literal["billing", "technical", "manager", "__end__"]]:
+    tools = [transfer_to_billing, transfer_to_tech, transfer_to_manager]
+    ai_msg = model.bind_tools(tools).invoke(state["messages"])
+    
+    if ai_msg.tool_calls:
+        # LLM intelligently chooses: billing, tech, or manager
+        return Command(goto=chosen_agent, update={"messages": [ai_msg]})
+    
+    return {"messages": [ai_msg]}  # Handle it myself
+```
 
-![./images/summarizer.png](./images/summarizer.png)
+**2. Research Workflow**
+```python
+def research_agent(state: MessagesState) -> Command[Literal["web_search", "database", "expert", "__end__"]]:
+    # LLM analyzes query and decides best next step
+    # - Simple fact? → database
+    # - Recent event? → web_search
+    # - Complex topic? → expert_interview
+    return Command(goto=llm_decided_route)
+```
 
+---
 
-This system implements a **conversation summarizer**. It tracks and summarizes conversations dynamically, after a certain message threshold is reached.
+### Parallel Execution
 
+Execute multiple nodes simultaneously for improved performance.
 
-| Step | Description |
-|------|------------|
-| **Conversation Handling** | Processes user messages and maintains conversation history. |
-| **Summarization Trigger** | If the message count exceeds a threshold, a summary is generated. |
-| **Summary Generation** | Condenses prior conversation history into a form |
+#### **Parallel Nodes**
 
-## Logic
-- If there is an existing **summary**, it is appended to new messages.
-- The system decides **whether to continue or summarize** based on message count.
-- The summarization step retains only **the last two messages** for efficiency.
+```python
+# Both nodes execute in parallel
+builder.add_edge(START, "node_a")
+builder.add_edge(START, "node_b")
+builder.add_edge("node_a", "merge")
+builder.add_edge("node_b", "merge")
+```
 
-- **Scalability** for long-form discussions.
+#### **Using Send for Dynamic Parallelism**
 
-This workflow helps conversations remain **concise and contextually rich**.
+```python
+from langgraph.types import Send
 
-## 6. [Research Assistant](./recipes/research_assistant.py)
+def fan_out(state: State) -> list[Send]:
+    # Dynamically create parallel executions
+    return [Send("process", {"item": item}) for item in state["items"]]
 
-![](./images/research_assistant.png)
+builder.add_conditional_edges("start", fan_out)
+```
 
+**Benefits:**
 
-This script defines a research workflow** that systematically **generates AI analysts, conducts interviews, retrieves external knowledge, and synthesizes reports** based on discussions.
+- **Performance**: Execute independent operations simultaneously
+- **Scalability**: Handle multiple items concurrently
+- **Efficiency**: Reduce total execution time
 
+---
 
-| Step | Description |
-|------|------------|
-| **Generate Analysts** | Creates AI personas based on the research topic. |
-| **Human Feedback** | Allows human validation before proceeding. |
-| **Conduct Interviews** | AI analysts interview an expert on sub-topics. |
-| **Retrieve Information** | Gathers additional knowledge via web search and Wikipedia. |
-| **Write Report Sections** | Summarizes interviews into structured sections. |
-| **Compile Final Report** | Combines sections into an introduction, body, and conclusion. |
+## Common Patterns
 
-## 1: Generate Analysts
-The `create_analysts` function initializes a set of **AI analysts** based on the research topic. It:
-- Uses **GPT-4o** to generate **structured personas**.
-- Incorporates **human feedback** to refine analyst roles.
-- Stores analysts with **affiliation, name, role, and expertise area**.
+### **1. ReAct Agent Pattern**
 
-## 2: Conduct Interviews
-The `generate_question` function enables AI analysts to:
-- Ask **insightful and specific** interview questions.
-- Guide the discussion towards **unique and non-obvious insights**.
-- Continue questioning **until they extract valuable information**.
+```python
+# Reason + Act loop
+builder.add_edge(START, "agent")
+builder.add_conditional_edges("agent", tools_condition)
+builder.add_edge("tools", "agent")  # Loop until done
+```
 
-The `generate_answer` function ensures that:
-- AI-generated experts respond based on **retrieved context**.
-- **Citations** from external documents are included.
+### **2. Map-Reduce Pattern**
 
-## Step 3: Retrieving External Knowledge
-To enhance response quality, **retrieval functions**:
-- `search_web(state)`: **Queries the web** for recent information.
-- `search_wikipedia(state)`: **Retrieves Wikipedia summaries**.
-- These sources are **formatted into structured documents** for later reference.
+```python
+# Map: Process items in parallel
+# Reduce: Aggregate results
+def map_step(state): ...
+def reduce_step(state): ...
 
-## Step 4: Writing Report Sections
-The `write_section` function:
-- Summarizes the interview into **a structured report section**.
-- Uses **Markdown formatting** with headings, summaries, and sources.
-- Ensures **concise yet insightful documentation**.
+builder.add_conditional_edges("start", fan_out_to_map_nodes)
+builder.add_edge("map_nodes", "reduce")
+```
 
-## Step 5: Compiling the Final Report
-The `write_report`, `write_introduction`, and `write_conclusion` functions:
-- **Aggregate sections into a coherent final report**.
-- Structure the content with **a compelling introduction and conclusion**.
-- Maintain **consistent citation formatting**.
+### **3. Human-in-the-Loop Pattern**
 
-## Step 6: Finalization
-The `finalize_report` function:
-- **Assembles all components** into a well-structured document.
-- Ensures **readability, completeness, and logical flow**.
+```python
+# Agent → Review → Continue/Modify
+builder.add_edge("agent", "review")
+builder.add_conditional_edges("review", check_approval)
+```
+
+### **4. Memory-Augmented Agent**
+
+```python
+# Load memory → Process → Update memory
+builder.add_edge(START, "load_memory")
+builder.add_edge("load_memory", "agent")
+builder.add_edge("agent", "update_memory")
+```
+
+---
+
+## Best Practices
+
+### **1. State Design**
+
+- Use **TypedDict** for type safety
+- Use **reducers** for accumulating state
+- Keep state minimal and focused
+- Document state schema clearly
+
+### **2. Node Design**
+
+- Keep nodes **focused and single-purpose**
+- Make nodes **idempotent** when possible
+- Handle errors gracefully
+- Use type hints for clarity
+
+### **3. Graph Structure**
+
+- Use **conditional edges** for dynamic routing
+- Leverage **parallel execution** for performance
+- Design for **resumability** with checkpoints
+- Add **interrupts** for human oversight
+
+### **4. Error Handling**
+
+```python
+def robust_node(state: State):
+    try:
+        # Node logic
+        return {"result": value}
+    except Exception as e:
+        # Handle error
+        return {"error": str(e)}
+```
+
+### **5. Testing**
+
+- Test nodes in isolation
+- Use mock checkpoints for testing
+- Verify state transitions
+- Test error scenarios
+
+### **6. Performance**
+
+- Use **streaming** for long-running tasks
+- Leverage **parallel execution** where possible
+- **Use async graph execution** (`await graph.ainvoke()`, `await graph.abatch()`) instead of blocking calls - LangGraph operations are I/O-bound (API calls, database queries), so async allows a single worker to handle hundreds of concurrent requests efficiently, rather than wasting CPU cycles waiting for I/O
+- **Use batch processing** (`batch()` or `abatch()`) when processing multiple inputs - Much more efficient than looping over `invoke()` calls
+- Implement **checkpointing** for durability
+- Monitor with **LangSmith**
+
+---
+
+## Tips
+
+### **1. Prevent Message State Bloat**
+`MessagesState` accumulates messages automatically - summarize or truncate periodically to prevent memory issues:
+
+```python
+# Summarize when messages exceed threshold
+if len(state["messages"]) > 50:
+    summary = summarize_messages(state["messages"][:-10])
+    return {"messages": [summary] + state["messages"][-10:]}
+```
+
+### **2. Always Add Timeouts**
+LLM API calls can hang indefinitely - add timeouts:
+
+```python
+llm = ChatOpenAI(model="gpt-4", timeout=30.0, max_retries=2)
+# Or wrap: await asyncio.wait_for(llm.ainvoke(messages), timeout=30.0)
+```
+
+### **3. Use Structured Outputs**
+Avoid parsing text - use `with_structured_output()` for type-safe responses:
+
+```python
+class Response(BaseModel):
+    answer: str
+    confidence: float
+response = llm.with_structured_output(Response).invoke(messages)
+```
+
+### **4. Manage Thread IDs Properly**
+Use unique thread IDs per user/session to avoid state collisions:
+
+```python
+thread_id = f"{user_id}:{session_id}"  # ✅ Good
+# thread_id = "default"  # ❌ Bad - causes collisions
+```
+
+### **5. Track and Optimize Costs**
+Monitor token usage and costs:
+
+```python
+from langchain.callbacks import get_openai_callback
+with get_openai_callback() as cb:
+    result = graph.invoke(input)
+    print(f"Tokens: {cb.total_tokens}, Cost: ${cb.total_cost:.4f}")
+```
+
+### **6. Validate Inputs Before Execution**
+Validate inputs before expensive graph execution:
+
+```python
+class GraphInput(BaseModel):
+    messages: list
+    @validator('messages')
+    def validate_messages(cls, v):
+        if len(v) > 100:
+            raise ValueError("Too many messages")
+        return v
+```
+
+### **7. Implement Graceful Degradation**
+Add fallback strategies when tools/APIs fail:
+
+```python
+try:
+    result = external_api.call(state["query"])
+except Exception:
+    result = simple_fallback(state["query"])  # Fallback
+```
+
+### **8. Visualize Graphs for Debugging**
+Use graph visualization to understand flow:
+
+```python
+graph_image = graph.get_graph().draw_mermaid_png()
+# Or use LangGraph Studio for interactive debugging
+```
+
+---
+
+## Resources
+
+### **Official Documentation**
+
+- **LangGraph Docs**: [docs.langchain.com/langgraph](https://docs.langchain.com/langgraph)
+- **API Reference**: [langchain-ai.github.io/langgraph](https://langchain-ai.github.io/langgraph/reference/)
+- **GitHub Repository**: [github.com/langchain-ai/langgraph](https://github.com/langchain-ai/langgraph)
+
+### **Tools and Integrations**
+
+- **LangGraph Studio**: Visual debugging and development tool
+- **LangSmith**: Observability and evaluation platform
+- **LangChain**: Comprehensive LLM application framework
+
+### **Learning Resources**
+
+- **Recipes**: See [recipes/README.md](./recipes/README.md) for practical examples
+- **Tutorials**: Check official documentation for step-by-step guides
+- **Community**: Join LangChain Discord for discussions

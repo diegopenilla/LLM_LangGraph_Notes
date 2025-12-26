@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_react_agent
 
 from utils import save_graph
 from dotenv import load_dotenv
